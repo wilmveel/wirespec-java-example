@@ -2,8 +2,10 @@ package community.flock.wirespec.example;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.MappingJsonFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import community.flock.wirespec.Wirespec;
 import community.flock.wirespec.generated.petstore.FindPetsByStatus;
 import community.flock.wirespec.generated.petstore.GetPetById;
@@ -26,10 +28,6 @@ import java.util.stream.Collectors;
 @Configuration
 public class PetstoreConfiguration {
 
-
-    public interface RequestHandler<Req, T> extends BiFunction<Wirespec.Request<Req>, BiFunction<Wirespec.ContentMapper<byte[]>, Wirespec.Response<byte[]>, Wirespec.Response<T>>, CompletableFuture<Wirespec.Response<T>>> {
-    }
-
     @Bean
     public RestTemplate restTemplate() {
         return new RestTemplate();
@@ -37,15 +35,18 @@ public class PetstoreConfiguration {
 
     @Bean
     public Wirespec.ContentMapper<byte[]> contentMapper(ObjectMapper objectMapper) {
+
+        final var wirespecObjectMapper = objectMapper.copy()
+                .enable(DeserializationFeature.READ_ENUMS_USING_TO_STRING)
+                .enable(SerializationFeature.WRITE_ENUMS_USING_TO_STRING)
+                .registerModule(new Jdk8Module());
+
         return new Wirespec.ContentMapper<>() {
             @Override
             public <T> Wirespec.Content<T> read(Wirespec.Content<byte[]> content, Type valueType) {
-                objectMapper
-                        .enable(DeserializationFeature.READ_ENUMS_USING_TO_STRING)
-                        .enable(SerializationFeature.WRITE_ENUMS_USING_TO_STRING);
-                var type = objectMapper.constructType(valueType);
+                var type = wirespecObjectMapper.constructType(valueType);
                 try {
-                    T obj = objectMapper.readValue(content.body(), type);
+                    T obj = wirespecObjectMapper.readValue(content.body(), type);
                     return new Wirespec.Content<T>(content.type(), obj);
                 } catch (IOException e) {
                     throw new RuntimeException("Cannot read content", e);
@@ -55,7 +56,7 @@ public class PetstoreConfiguration {
             @Override
             public <T> Wirespec.Content<byte[]> write(Wirespec.Content<T> content) {
                 try {
-                    var bytes = objectMapper.writeValueAsBytes(content.body());
+                    var bytes = wirespecObjectMapper.writeValueAsBytes(content.body());
                     return new Wirespec.Content<>(content.type(), bytes);
                 } catch (JsonProcessingException e) {
                     throw new RuntimeException("Cannot write content", e);
@@ -64,80 +65,76 @@ public class PetstoreConfiguration {
         };
     }
 
-    @Bean
-    public <R, T> RequestHandler<R, T> requestHandler(ObjectMapper objectMapper, RestTemplate restTemplate, Wirespec.ContentMapper<byte[]> contentMapper) {
-        return (request, responseMapper) -> {
-
-            final var query = request.getQuery().entrySet()
-                    .stream()
-                    .collect(Collectors.toMap(
-                            Map.Entry::getKey,
-                            it -> it.getValue().stream().map(v -> {
-                                try {
-                                    return objectMapper.writeValueAsString(v).replaceAll("^\"|\"$", "");
-                                } catch (JsonProcessingException e) {
-                                    throw new RuntimeException(e);
-                                }
-                            }).collect(Collectors.toList()))
-                    );
-
-            final var uri = UriComponentsBuilder
-                    .fromUriString("https://petstore3.swagger.io/api/v3" + request.getPath())
-                    .queryParams(new LinkedMultiValueMap<>(query))
-                    .build()
-                    .toUri();
-
-            final var result = restTemplate.execute(
-                    uri,
-                    HttpMethod.valueOf(request.getMethod().name()),
-                    req -> {
-                        if (request.getContent() != null) {
-                            final var content = contentMapper.write(request.getContent());
-                            req.getBody().write(content.body());
-                        }
-                    },
-                    res -> {
-                        final var statusCode = res.getStatusCode().value();
-                        final var contentType = res.getHeaders().getContentType().toString();
-                        final var content = new Wirespec.Content(contentType, res.getBody().readAllBytes());
-
-                        final var wirespecResponse = new Wirespec.Response<byte[]>() {
-                            @Override
-                            public int getStatus() {
-                                return statusCode;
-                            }
-
-                            @Override
-                            public Map<String, List<Object>> getHeaders() {
-                                return null;
-                            }
-
-                            @Override
-                            public Wirespec.Content<byte[]> getContent() {
-                                return content;
-                            }
-                        };
-                        return responseMapper.apply(contentMapper, wirespecResponse);
-                    }
-            );
-            return CompletableFuture.completedFuture(result);
-        };
-    }
-
 
     @Bean
-    public <R, T> PetstoreClient petstoreClient(RequestHandler<R, T> requestHandler) {
+    public PetstoreClient petstoreClient(ObjectMapper objectMapper, RestTemplate restTemplate, Wirespec.ContentMapper<byte[]> contentMapper) {
 
         return new PetstoreClient() {
 
-            @Override
-            public CompletableFuture<GetPetById.Response> getPetById(GetPetById.Request request) {
-                return requestHandler.apply(request, GetPetById::RESPONSE_MAPPER);
+            public <Res extends Wirespec.Response<?>> CompletableFuture<Res> handle(Wirespec.Request<?> request, BiFunction<Wirespec.ContentMapper<byte[]>, Wirespec.Response<byte[]>, Res> responseMapper){
+                final var query = request.getQuery().entrySet()
+                        .stream()
+                        .collect(Collectors.toMap(
+                                Map.Entry::getKey,
+                                it -> it.getValue().stream().map(v -> {
+                                    try {
+                                        return objectMapper.writeValueAsString(v).replaceAll("^\"|\"$", "");
+                                    } catch (JsonProcessingException e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                }).collect(Collectors.toList()))
+                        );
+
+                final var uri = UriComponentsBuilder
+                        .fromUriString("https://petstore3.swagger.io/api/v3" + request.getPath())
+                        .queryParams(new LinkedMultiValueMap<>(query))
+                        .build()
+                        .toUri();
+
+                final var result = restTemplate.execute(
+                        uri,
+                        HttpMethod.valueOf(request.getMethod().name()),
+                        req -> {
+                            if (request.getContent() != null) {
+                                final var content = contentMapper.write(request.getContent());
+                                req.getBody().write(content.body());
+                            }
+                        },
+                        res -> {
+                            final var statusCode = res.getStatusCode().value();
+                            final var contentType = res.getHeaders().getContentType().toString();
+                            final var content = new Wirespec.Content<>(contentType, res.getBody().readAllBytes());
+
+                            final var wirespecResponse = new Wirespec.Response<byte[]>() {
+                                @Override
+                                public int getStatus() {
+                                    return statusCode;
+                                }
+
+                                @Override
+                                public Map<String, List<Object>> getHeaders() {
+                                    return null;
+                                }
+
+                                @Override
+                                public Wirespec.Content<byte[]> getContent() {
+                                    return content;
+                                }
+                            };
+                            return responseMapper.apply(contentMapper, wirespecResponse);
+                        }
+                );
+                return CompletableFuture.completedFuture(result);
             }
 
             @Override
-            public CompletableFuture<FindPetsByStatus.Response> findPetsByStatus(FindPetsByStatus.Request request) {
-                return requestHandler.apply(request, FindPetsByStatus::RESPONSE_MAPPER);
+            public CompletableFuture<GetPetById.Response<?>> getPetById(GetPetById.Request<?> request) {
+                return handle(request, GetPetById::RESPONSE_MAPPER);
+            }
+
+            @Override
+            public CompletableFuture<FindPetsByStatus.Response<?>> findPetsByStatus(FindPetsByStatus.Request<?> request) {
+                return handle(request, FindPetsByStatus::RESPONSE_MAPPER);
             }
         };
     }
