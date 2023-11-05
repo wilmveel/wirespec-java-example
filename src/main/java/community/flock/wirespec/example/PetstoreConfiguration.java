@@ -7,12 +7,13 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiFunction;
+import java.util.function.Function;
 
 @Configuration
 public class PetstoreConfiguration {
 
-    interface ResponseMapper<Res extends Wirespec.Response<?>> extends BiFunction<Wirespec.ContentMapper<byte[]>, Wirespec.Response<byte[]>, Res> { }
+    interface ResponseMapper<Res extends Wirespec.Response<?>> extends Function<Wirespec.ContentMapper<byte[]>, Function<Wirespec.Response<byte[]>, Res>> {
+    }
 
     @Bean
     public PetstoreClient petstoreClient(WirespecConfiguration.RequestHandler<Wirespec.Request<?>> requestHandler, Wirespec.ContentMapper<byte[]> contentMapper) {
@@ -22,11 +23,11 @@ public class PetstoreConfiguration {
             public <Req extends Wirespec.Request<?>, Res extends Wirespec.Response<?>> CompletableFuture<Res> handle(Req request, ResponseMapper<Res> responseMapper) {
                 return requestHandler
                         .apply(request)
-                        .thenApply(response -> responseMapper.apply(contentMapper, response));
+                        .thenApply(responseMapper.apply(contentMapper));
             }
 
             @Override
-            public CompletableFuture<GetPetById.Response<?>> getPetById(GetPetById.Request<?> request){
+            public CompletableFuture<GetPetById.Response<?>> getPetById(GetPetById.Request<?> request) {
                 return handle(request, GetPetById::RESPONSE_MAPPER);
             }
 

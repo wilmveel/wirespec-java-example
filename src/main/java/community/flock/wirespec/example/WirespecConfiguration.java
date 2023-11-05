@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import community.flock.wirespec.Wirespec;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,7 +23,10 @@ import java.util.stream.Collectors;
 @Configuration
 public class WirespecConfiguration {
 
-    public interface RequestHandler<Req extends Wirespec.Request<?>> extends Function<Req, CompletableFuture<Wirespec.Response<byte[]>>>{};
+    public interface RequestHandler<Req extends Wirespec.Request<?>> extends Function<Req, CompletableFuture<Wirespec.Response<byte[]>>> {
+    }
+
+    ;
 
     @Bean
     public RestTemplate restTemplate() {
@@ -36,8 +38,7 @@ public class WirespecConfiguration {
 
         final var wirespecObjectMapper = objectMapper.copy()
                 .enable(DeserializationFeature.READ_ENUMS_USING_TO_STRING)
-                .enable(SerializationFeature.WRITE_ENUMS_USING_TO_STRING)
-                .registerModule(new Jdk8Module());
+                .enable(SerializationFeature.WRITE_ENUMS_USING_TO_STRING);
 
         return new Wirespec.ContentMapper<>() {
             @Override
@@ -64,7 +65,7 @@ public class WirespecConfiguration {
     }
 
     @Bean
-    public <Req extends Wirespec.Request<?>> RequestHandler<Req> requestHandler(ObjectMapper objectMapper, RestTemplate restTemplate, Wirespec.ContentMapper<byte[]> contentMapper){
+    public <Req extends Wirespec.Request<?>> RequestHandler<Req> requestHandler(ObjectMapper objectMapper, RestTemplate restTemplate, Wirespec.ContentMapper<byte[]> contentMapper) {
         return request -> {
             final var query = request.getQuery().entrySet()
                     .stream()

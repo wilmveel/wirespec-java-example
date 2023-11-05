@@ -19,7 +19,7 @@ public class PetstoreService {
     public List<Pet> findPetsByStatus(FindPetsByStatusParameterStatus status) throws ExecutionException, InterruptedException {
         final var req = new FindPetsByStatus.RequestVoid(Optional.of(status));
         final var res = petstoreClient.findPetsByStatus(req).get();
-        return switch (res){
+        return switch (res) {
             case FindPetsByStatus.Response200ApplicationJson r -> r.getContent().body();
             case FindPetsByStatus.Response200ApplicationXml r -> r.getContent().body();
             case FindPetsByStatus.Response400Void ignored -> throw new IllegalStateException("Pet not found");
