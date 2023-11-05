@@ -24,6 +24,8 @@ import java.util.stream.Collectors;
 @Configuration
 public class WirespecConfiguration {
 
+    public interface RequestHandler<Req extends Wirespec.Request<?>> extends Function<Req, CompletableFuture<Wirespec.Response<byte[]>>>{};
+
     @Bean
     public RestTemplate restTemplate() {
         return new RestTemplate();
@@ -62,7 +64,7 @@ public class WirespecConfiguration {
     }
 
     @Bean
-    public Function<Wirespec.Request<?>, CompletableFuture<Wirespec.Response<byte[]>>> requestHandler(ObjectMapper objectMapper, RestTemplate restTemplate, Wirespec.ContentMapper<byte[]> contentMapper){
+    public <Req extends Wirespec.Request<?>> RequestHandler<Req> requestHandler(ObjectMapper objectMapper, RestTemplate restTemplate, Wirespec.ContentMapper<byte[]> contentMapper){
         return request -> {
             final var query = request.getQuery().entrySet()
                     .stream()
@@ -97,7 +99,7 @@ public class WirespecConfiguration {
                         final var contentType = res.getHeaders().getContentType().toString();
                         final var content = new Wirespec.Content<>(contentType, res.getBody().readAllBytes());
 
-                        final var wirespecResponse = new Wirespec.Response<byte[]>() {
+                        return new Wirespec.Response<byte[]>() {
                             @Override
                             public int getStatus() {
                                 return statusCode;
@@ -113,7 +115,6 @@ public class WirespecConfiguration {
                                 return content;
                             }
                         };
-                        return wirespecResponse;
                     }
             );
 
